@@ -24,7 +24,7 @@ func page[DataType any](offset int64, capacity int) interfaces.Page[DataType] {
 	return &BTPage[DataType]{
 		capacity: capacity,
 		items:    make([]interfaces.Item[DataType], 0, capacity+1),
-		children: make([]*BTChildPage[DataType], 0, capacity+1),
+		children: make([]*BTChildPage[DataType], 0, capacity+2),
 		offset:   offset,
 	}
 }
@@ -122,7 +122,7 @@ func (b *BTPage[DataType]) Size() int {
 func (p *BTPage[DataType]) String() string {
 	s := p.Size()
 	if s > 0 {
-		return fmt.Sprintf("{%d: %v}", p.Offset(), p.Items().ToSlice())
+		return fmt.Sprintf("{%.19d: %v}", p.Offset(), p.Items().ToSlice())
 	}
 	return "[]"
 }
@@ -140,12 +140,14 @@ func (p *BTPage[DataType]) childrenToPageList(children []*BTChildPage[DataType])
 }
 
 func (p *BTPage[DataType]) pageListToChildren(pages []interfaces.Page[DataType], setParent ...bool) []*BTChildPage[DataType] {
-	children := make([]*BTChildPage[DataType], len(pages))
-	for i, c := range pages {
-		if len(setParent) > 0 && setParent[0] {
-			c.Parent(p)
+	children := make([]*BTChildPage[DataType], 0, len(pages))
+	for _, c := range pages {
+		if c != nil {
+			if len(setParent) > 0 && setParent[0] {
+				c.Parent(p)
+			}
+			children = append(children, p.createChildPage(c))
 		}
-		children[i] = p.createChildPage(c)
 	}
 	return children
 }

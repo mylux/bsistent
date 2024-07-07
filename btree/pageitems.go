@@ -21,10 +21,10 @@ func (i *BTPageItems[DataType]) Item(index int) interfaces.Item[DataType] {
 func (i *BTPageItems[DataType]) Split() ([]interfaces.Item[DataType], []interfaces.Page[DataType], []interfaces.Item[DataType], []interfaces.Page[DataType], interfaces.Item[DataType]) {
 	items := i.page.Items().ToSlice()
 	middle := (i.page.Size()) / 2
-	left := make([]interfaces.Item[DataType], middle, middle+1)
-	right := make([]interfaces.Item[DataType], middle, middle+1)
-	childrenLeft := make([]interfaces.Page[DataType], 0, middle+1)
-	childrenRight := make([]interfaces.Page[DataType], 0, middle+1)
+	left := make([]interfaces.Item[DataType], middle, i.page.Capacity()+1)
+	right := make([]interfaces.Item[DataType], middle, i.page.Capacity()+1)
+	childrenLeft := make([]interfaces.Page[DataType], 0, i.page.Capacity()+2)
+	childrenRight := make([]interfaces.Page[DataType], 0, i.page.Capacity()+2)
 	copy(left, items[:middle])
 	copy(right, items[middle+1:])
 	if !i.page.IsLeaf() {

@@ -53,8 +53,11 @@ func (b *Btree[DataType]) addChildToPage(page interfaces.Page[DataType], child i
 	b.changed[page.Offset()] = page
 }
 
-func (b *Btree[DataType]) addItemToPage(page interfaces.Page[DataType], item interfaces.Item[DataType]) {
+func (b *Btree[DataType]) addItemToPage(page interfaces.Page[DataType], item interfaces.Item[DataType], child ...interfaces.Page[DataType]) {
 	page.Add(item)
+	if len(child) > 0 && child[0] != nil {
+		b.addChildToPage(page, child[0])
+	}
 	if page.IsFull() {
 		b.splitPage(page)
 	}
@@ -175,8 +178,7 @@ func (b *Btree[DataType]) splitPage(page interfaces.Page[DataType]) {
 		page.Children(childrenLeft)
 		newPageRight.Children(childrenRight)
 	}
-	b.addItemToPage(ppg, pivot)
-	b.addChildToPage(ppg, newPageRight)
+	b.addItemToPage(ppg, pivot, newPageRight)
 
 	if ppg.IsFull() {
 		b.splitPage(ppg)

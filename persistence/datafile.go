@@ -137,6 +137,8 @@ func (d *DataFileBtreePersistence[DataType]) NewPage(first ...bool) (interfaces.
 
 func (d *DataFileBtreePersistence[DataType]) Reset() {
 	err := d.fd.Truncate(0)
+	d.rootOffset = 0
+	d.lastPageOffset = 0
 	if err != nil {
 		panic(err)
 	}
