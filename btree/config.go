@@ -14,6 +14,7 @@ var defaultConfig BTConfig[any] = BTConfig[any]{
 	size:        0,
 	storagePath: fmt.Sprintf("%s/.bsistent/bsistent", os.Getenv("HOME")),
 	reset:       false,
+	cacheSize:   0,
 }
 
 type BTConfig[DataType any] struct {
@@ -22,6 +23,7 @@ type BTConfig[DataType any] struct {
 	size        int64
 	storagePath string
 	reset       bool
+	cacheSize   uint32
 }
 
 func Configuration[DataType any]() *BTConfig[DataType] {
@@ -53,6 +55,11 @@ func (c *BTConfig[DataType]) StoragePath(storagePath string) *BTConfig[DataType]
 	return c
 }
 
+func (c *BTConfig[DataType]) CacheSize(size uint32) *BTConfig[DataType] {
+	c.cacheSize = size
+	return c
+}
+
 func (c *BTConfig[DataType]) Make() *Btree[DataType] {
 	fp := func(offset int64) interfaces.Page[DataType] {
 		return page[DataType](offset, c.grade-1)
@@ -61,6 +68,12 @@ func (c *BTConfig[DataType]) Make() *Btree[DataType] {
 	fi := func() interfaces.Item[DataType] {
 		return item[DataType](c.itemSize)
 	}
-	p := assemblers.NewPersistence[DataType](c.storagePath, fp, fi)
+	p := assemblers.NewPersistence[DataType](
+		&interfaces.PersistenceConfig[DataType]{
+			Path:            c.storagePath,
+			PageConstructor: fp,
+			ItemConstructor: fi,
+			CacheSize:       c.cacheSize,
+		})
 	return btree[DataType](c.grade, c.itemSize, c.storagePath, c.reset, p)
 }

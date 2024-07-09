@@ -47,9 +47,9 @@ func count(b *btree.Btree[int64]) int {
 
 func main() {
 	var strT string
-	var b *btree.Btree[int64] = btree.Configuration[int64]().Grade(5).ItemSize(8).Make()
+	var b *btree.Btree[int64] = btree.Configuration[int64]().Grade(5).ItemSize(8).CacheSize(40).Make()
 	if b.IsEmpty() {
-		elements := generateUniqueInts(50)
+		elements := generateUniqueInts(500)
 		// elements := fixedItems[:50]
 		fmt.Printf("Elements: %v\n", elements)
 		fmt.Printf("Created a Btreee object with size=%d and storing data in %s file\n", b.Size(), b.StoragePath())
@@ -59,12 +59,12 @@ func main() {
 			b.Add(e)
 		}
 		fmt.Println("Finished adding items")
-		fmt.Printf("Item count %d vs %d\n", count(b), len(elements))
+		fmt.Printf("Item count %d vs %d vs %d\n", count(b), len(elements), b.Size())
 		strT = fmt.Sprintf("%v\n", b)
 	} else {
 		fmt.Println("Btree is not empty")
 		strT = fmt.Sprintf("%v\n", b)
-		fmt.Printf("Item count %d\n", count(b))
+		fmt.Printf("Item count %d vs %d\n", count(b), b.Size())
 	}
 
 	fmt.Printf("%v\n", strT)

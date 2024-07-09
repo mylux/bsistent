@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"unsafe"
 
+	"github.com/mylux/bsistent/cache"
 	"github.com/mylux/bsistent/interfaces"
+	"github.com/mylux/bsistent/utils"
 )
 
 const (
-	initialOffset     = 8
-	rootPageRefOffset = 0
+	initialOffset     int64 = 16
+	sizeOffset        int64 = 8
+	rootPageRefOffset int64 = 0
 )
 
 type DataFileBtreePersistence[DataType any] struct {
@@ -22,61 +26,49 @@ type DataFileBtreePersistence[DataType any] struct {
 	fd              *os.File
 	pageConstructor func(int64) interfaces.Page[DataType]
 	itemConstructor func() interfaces.Item[DataType]
+	cache           *cache.Cache[DataType]
 }
 
-func New[DataType any](
-	path string,
-	pc func(int64) interfaces.Page[DataType],
-	ic func() interfaces.Item[DataType]) interfaces.Persistence[DataType] {
-	zeroPg, err := generateEncodedZeroPage(pc(0).Capacity(), ic().Capacity())
-	if err != nil {
-		panic(err)
-	}
-	r := &DataFileBtreePersistence[DataType]{
-		path:            path,
-		pageSize:        int64(len(zeroPg)),
-		fd:              openFile(path),
-		pageConstructor: pc,
-		itemConstructor: ic,
-		lastPageOffset:  initialOffset,
-	}
-	rootRef, err := r.LoadReference()
-	if err != nil || rootRef == 0 {
-		err = r.SaveRootReference(0)
-	}
+func New[DataType any](config *interfaces.PersistenceConfig[DataType]) interfaces.Persistence[DataType] {
+	zeroPg := utils.ReturnOrPanic[[]byte](func() ([]byte, error) {
+		return generateEncodedZeroPage(config.PageConstructor(0).Capacity(), config.ItemConstructor().Capacity())
+	})
 
-	if err != nil {
-		panic(err)
+	r := &DataFileBtreePersistence[DataType]{
+		path:            config.Path,
+		pageSize:        int64(len(zeroPg)),
+		fd:              openFile(config.Path),
+		pageConstructor: config.PageConstructor,
+		itemConstructor: config.ItemConstructor,
+		lastPageOffset:  initialOffset,
+		cache: cache.New(&cache.Config[DataType]{
+			Limit:         config.CacheSize,
+			PageGenerator: func() interfaces.Page[DataType] { return config.PageConstructor(0) },
+		}),
 	}
+	utils.PanicOnError(func() error { return loadTreeSize(r) })
+	utils.PanicOnError(func() error { return loadRootPageReference(r) })
+
 	return r
 }
 
 func (d *DataFileBtreePersistence[DataType]) Load(offset int64, children ...bool) interfaces.Page[DataType] {
+	if pCache := d.loadPageFromCache(offset); pCache != nil {
+		return pCache
+	}
 	defer d.Unlock()
 	if !d.locked {
 		d.Lock()
-		b, err := d.readPageBytes(offset)
-		if err != nil {
-			panic(err)
-		}
-		sp, err := hydratePage(b)
-		if err != nil {
-			panic(err)
-		}
+		b := utils.ReturnOrPanic[[]byte](func() ([]byte, error) { return d.readPageBytes(offset) })
+		sp := utils.ReturnOrPanic[*SerializedPage](func() (*SerializedPage, error) { return hydratePage(b) })
 		items := make([]interfaces.Item[DataType], 0, sp.Capacity)
 		r := d.pageConstructor(offset)
 		for _, i := range sp.Items {
 			item := d.itemConstructor()
-			si, err := hydrateItem(i)
-			if err != nil {
-				panic(err)
-			}
+			si := utils.ReturnOrPanic[*SerializedItem](func() (*SerializedItem, error) { return hydrateItem(i) })
 			if !si.Empty {
 				var itemValue DataType
-				err = decode(bytes.NewReader(si.Content), &itemValue)
-				if err != nil {
-					panic(err)
-				}
+				utils.PanicOnError(func() error { return decode(bytes.NewReader(si.Content), &itemValue) })
 				item.Load(itemValue)
 				items = append(items, item)
 			}
@@ -91,6 +83,7 @@ func (d *DataFileBtreePersistence[DataType]) Load(offset int64, children ...bool
 				}
 			}
 		}
+		d.cache.Save(r)
 		return r
 	}
 	return nil
@@ -108,7 +101,7 @@ func (d *DataFileBtreePersistence[DataType]) LoadRoot() (interfaces.Page[DataTyp
 
 func (d *DataFileBtreePersistence[DataType]) LoadReference() (int64, error) {
 	var r int64
-	b, err := d.readBytes(rootPageRefOffset, initialOffset)
+	b, err := d.readBytes(rootPageRefOffset, int64(unsafe.Sizeof(rootPageRefOffset)))
 	buf := bytes.NewReader(b)
 	if err != nil {
 		return -1, err
@@ -119,6 +112,17 @@ func (d *DataFileBtreePersistence[DataType]) LoadReference() (int64, error) {
 	}
 	d.rootOffset = r
 	return r, nil
+}
+
+func (d *DataFileBtreePersistence[DataType]) LoadSize() (int64, error) {
+	var size int64
+	b, err := d.readBytes(sizeOffset, int64(unsafe.Sizeof(sizeOffset)))
+	if err != nil {
+		return -1, err
+	}
+	buf := bytes.NewReader(b)
+	err = decode(buf, &size)
+	return size, err
 }
 
 func (d *DataFileBtreePersistence[DataType]) Lock() {
@@ -136,12 +140,9 @@ func (d *DataFileBtreePersistence[DataType]) NewPage(first ...bool) (interfaces.
 }
 
 func (d *DataFileBtreePersistence[DataType]) Reset() {
-	err := d.fd.Truncate(0)
 	d.rootOffset = 0
 	d.lastPageOffset = 0
-	if err != nil {
-		panic(err)
-	}
+	utils.PanicOnError(func() error { return d.fd.Truncate(0) })
 }
 
 func (d *DataFileBtreePersistence[DataType]) Save(p interfaces.Page[DataType]) error {
@@ -152,7 +153,11 @@ func (d *DataFileBtreePersistence[DataType]) Save(p interfaces.Page[DataType]) e
 		if err != nil {
 			return err
 		}
-		return d.savePageBytes(b, p.Offset())
+		err = d.savePageBytes(b, p.Offset())
+		if err == nil {
+			d.cache.Update(p)
+		}
+		return err
 	}
 	return nil
 }
@@ -166,6 +171,15 @@ func (d *DataFileBtreePersistence[DataType]) SaveRootReference(offset int64) err
 	return err
 }
 
+func (d *DataFileBtreePersistence[DataType]) SaveSize(size int64) error {
+	s, err := encode(size)
+	if err != nil {
+		return err
+	}
+	_, err = d.saveBytes(s, sizeOffset)
+	return err
+}
+
 func (d *DataFileBtreePersistence[DataType]) Unlock() {
 	d.locked = false
 }
@@ -173,6 +187,10 @@ func (d *DataFileBtreePersistence[DataType]) Unlock() {
 func (d *DataFileBtreePersistence[DataType]) genNewOffset() int64 {
 	d.lastPageOffset += (d.pageSize)
 	return d.lastPageOffset
+}
+
+func (d *DataFileBtreePersistence[DataType]) loadPageFromCache(offset int64) interfaces.Page[DataType] {
+	return d.cache.Load(offset)
 }
 
 func (d *DataFileBtreePersistence[DataType]) reservePage(first ...bool) error {
@@ -205,19 +223,29 @@ func (d *DataFileBtreePersistence[DataType]) readPageBytes(offset int64) ([]byte
 	return b, err
 }
 
+func loadTreeSize[DataType any](d *DataFileBtreePersistence[DataType]) error {
+	_, err := d.LoadSize()
+	if err != nil {
+		err = d.SaveSize(0)
+	}
+	return err
+}
+
+func loadRootPageReference[DataType any](d *DataFileBtreePersistence[DataType]) error {
+	rootRef, err := d.LoadReference()
+	if err != nil || rootRef == 0 {
+		err = d.SaveRootReference(0)
+	}
+	return err
+}
+
 func openFile(path string) *os.File {
 	file, err := os.OpenFile(path, os.O_RDWR, 0666)
 	if err != nil {
 		if os.IsNotExist(err) {
-			newFile, createErr := os.Create(path)
-			if createErr != nil {
-				panic(createErr)
-			}
+			newFile := utils.ReturnOrPanic[*os.File](func() (*os.File, error) { return os.Create(path) })
 			newFile.Close()
-			file, err = os.OpenFile(path, os.O_RDWR, 0666)
-			if err != nil {
-				panic(err)
-			}
+			file = utils.ReturnOrPanic[*os.File](func() (*os.File, error) { return os.OpenFile(path, os.O_RDWR, 0666) })
 		} else {
 			panic(err)
 		}

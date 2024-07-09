@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mylux/bsistent/interfaces"
+	"github.com/mylux/bsistent/utils"
 )
 
 const printPrefix = "|-- "
@@ -24,6 +25,7 @@ func (b *Btree[DataType]) Add(value DataType) {
 	if item := item[DataType](b.itemSize).Load(value); !item.IsEmpty() {
 		leaf := b.findLeafFor(b.root, item)
 		b.addItemToPage(leaf, item)
+		b.size++
 		b.persist()
 	}
 }
@@ -75,21 +77,15 @@ func btree[DataType any](
 		p.Reset()
 	}
 
-	root, err := p.LoadRoot()
-	if err != nil {
-		panic(err)
-	}
-
-	b := &Btree[DataType]{
+	return &Btree[DataType]{
 		grade:       grade,
 		itemSize:    itemSize,
 		storagePath: storagePath,
 		persistence: p,
 		changed:     map[int64]interfaces.Page[DataType]{},
-		root:        root,
+		root:        utils.ReturnOrPanic[interfaces.Page[DataType]](p.LoadRoot),
+		size:        utils.ReturnOrPanic[int64](p.LoadSize),
 	}
-
-	return b
 }
 
 func (b *Btree[DataType]) findLeafFor(page interfaces.Page[DataType], item interfaces.Item[DataType]) interfaces.Page[DataType] {
@@ -142,27 +138,25 @@ func (b *Btree[DataType]) newRoot(page interfaces.Page[DataType]) interfaces.Pag
 
 func (b *Btree[DataType]) persist() {
 	for _, p := range b.changed {
-		err := b.persistence.Save(p)
-		if err != nil {
-			panic(err)
-		}
+		utils.PanicOnError(func() error { return b.persistence.Save(p) })
 		delete(b.changed, p.Offset())
 		if b.rootChanged {
-			err := b.persistRoot()
-			if err != nil {
-				panic(err)
-			}
+			utils.PanicOnError(b.persistRoot)
 		}
 	}
+	utils.PanicOnError(b.persistSize)
 }
 
 func (b *Btree[DataType]) persistRoot() error {
 	err := b.persistence.SaveRootReference(b.root.Offset())
-	if err != nil {
-		return err
+	if err == nil {
+		b.rootChanged = false
 	}
-	b.rootChanged = false
-	return nil
+	return err
+}
+
+func (b *Btree[DataType]) persistSize() error {
+	return b.persistence.SaveSize(b.Size())
 }
 
 func (b *Btree[DataType]) splitPage(page interfaces.Page[DataType]) {

@@ -5,7 +5,6 @@ import (
 	"github.com/mylux/bsistent/persistence"
 )
 
-func NewPersistence[T any](
-	path string, pageCreator func(int64) interfaces.Page[T], itemCreator func() interfaces.Item[T]) interfaces.Persistence[T] {
-	return persistence.New[T](path, pageCreator, itemCreator)
+func NewPersistence[T any](config *interfaces.PersistenceConfig[T]) interfaces.Persistence[T] {
+	return persistence.New[T](config)
 }
