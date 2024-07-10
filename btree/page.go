@@ -127,6 +127,12 @@ func (p *BTPage[DataType]) String() string {
 	return "[]"
 }
 
+func (p *BTPage[DataType]) UnloadChildren() {
+	for _, c := range p.children {
+		c.Page = nil
+	}
+}
+
 func (p *BTPage[DataType]) createChildPage(page interfaces.Page[DataType]) *BTChildPage[DataType] {
 	return &BTChildPage[DataType]{Offset: page.Offset(), Page: page}
 }

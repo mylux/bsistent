@@ -141,7 +141,7 @@ func (d *DataFileBtreePersistence[DataType]) NewPage(first ...bool) (interfaces.
 
 func (d *DataFileBtreePersistence[DataType]) Reset() {
 	d.rootOffset = 0
-	d.lastPageOffset = 0
+	d.lastPageOffset = initialOffset
 	utils.PanicOnError(func() error { return d.fd.Truncate(0) })
 }
 

@@ -17,4 +17,5 @@ type Page[DataType any] interface {
 	Parent(parent ...Page[DataType]) Page[DataType]
 	Size() int
 	String() string
+	UnloadChildren()
 }

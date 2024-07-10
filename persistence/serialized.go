@@ -83,17 +83,17 @@ func serializePage[T any](p interfaces.Page[T]) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	children := make([]int64, p.Capacity()+1)
 
-	for i, c := range p.Children() {
-		children[i] = int64(c.Offset())
-	}
+	sChildren := make([]int64, p.Capacity()+1)
+	_, children := p.GetChildrenStatus()
+
+	copy(sChildren, children)
 
 	return encodePage(&SerializedPage{
 		Offset:   int64(p.Offset()),
 		Capacity: int64(p.Capacity()),
 		Items:    items,
-		Children: children,
+		Children: sChildren,
 	})
 }
 
