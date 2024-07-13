@@ -79,7 +79,7 @@ func (d *DataFileBtreePersistence[DataType]) Load(offset int64, children ...bool
 				if len(children) > 0 && children[0] {
 					r.AddChild(d.Load(c))
 				} else {
-					r.AppendChildOffset(c)
+					r.Children().Put(c)
 				}
 			}
 		}

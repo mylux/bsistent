@@ -11,15 +11,14 @@ const printPrefix = "|-- "
 const printSpacing = "    "
 
 type Btree[DataType any] struct {
-	size          int64
-	grade         int
-	itemSize      int64
-	storagePath   string
-	root          interfaces.Page[DataType]
-	persistence   interfaces.Persistence[DataType]
-	changed       map[int64]interfaces.Page[DataType]
-	rootChanged   bool
-	pageOfConcern interfaces.Page[DataType]
+	size        int64
+	grade       int
+	itemSize    int64
+	storagePath string
+	root        interfaces.Page[DataType]
+	persistence interfaces.Persistence[DataType]
+	changed     map[int64]interfaces.Page[DataType]
+	rootChanged bool
 }
 
 func (b *Btree[DataType]) Add(value DataType) {
@@ -28,7 +27,6 @@ func (b *Btree[DataType]) Add(value DataType) {
 		b.addItemToPage(leaf, item)
 		b.size++
 		b.persist()
-		b.root.UnloadChildren()
 	}
 }
 
@@ -90,16 +88,11 @@ func btree[DataType any](
 	}
 }
 
-func (b *Btree[DataType]) fetchPageChildren(page interfaces.Page[DataType]) []interfaces.Page[DataType] {
-	return page.Children(b.loadPageChildren(page))
-}
-
 func (b *Btree[DataType]) findLeafFor(page interfaces.Page[DataType], item interfaces.Item[DataType]) interfaces.Page[DataType] {
 	if page.IsLeaf() {
 		return page
 	} else {
-		b.fetchPageChildren(page)
-		return b.findLeafFor(page.ChildFor(item), item)
+		return b.findLeafFor(b.LoadPageChildren(page).ChildFor(item), item)
 	}
 }
 
@@ -108,16 +101,16 @@ func (b *Btree[DataType]) genPagePrettyPrint(p interfaces.Page[DataType], prefix
 	if p != nil {
 		res = fmt.Sprintln(prefix, printPrefix, p)
 		newPrefix := prefix + printSpacing
-		children := b.loadPageChildren(p)
+		children := b.LoadPageChildren(p)
 		p = nil
-		for _, c := range children {
+		for _, c := range children.All() {
 			res = res + b.genPagePrettyPrint(c, newPrefix)
 		}
 	}
 	return res
 }
 
-func (b *Btree[DataType]) loadOffsets(offsets []int64) []interfaces.Page[DataType] {
+func (b *Btree[DataType]) LoadOffsets(offsets []int64) []interfaces.Page[DataType] {
 	c := make([]interfaces.Page[DataType], len(offsets))
 	for i, o := range offsets {
 		c[i] = b.persistence.Load(o)
@@ -125,18 +118,16 @@ func (b *Btree[DataType]) loadOffsets(offsets []int64) []interfaces.Page[DataTyp
 	return c
 }
 
-func (b *Btree[DataType]) loadPageChildren(page interfaces.Page[DataType]) []interfaces.Page[DataType] {
-	if loaded, offsets := page.GetChildrenStatus(); !loaded {
-		return b.loadOffsets(offsets)
+func (b *Btree[DataType]) LoadPageChildren(page interfaces.Page[DataType]) interfaces.PageChildren[DataType] {
+	children := page.Children()
+	if !children.IsFetched() {
+		return page.Children(b.LoadOffsets(children.Offsets()))
 	}
 	return page.Children()
 }
 
 func (b *Btree[DataType]) newPage(parent interfaces.Page[DataType]) interfaces.Page[DataType] {
 	p, _ := b.persistence.NewPage()
-	if p.Offset() == 140 {
-		b.pageOfConcern = p
-	}
 	p.Parent(parent)
 	b.changed[p.Offset()] = p
 	return p
