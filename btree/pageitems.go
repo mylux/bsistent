@@ -18,25 +18,15 @@ func (i *BTPageItems[DataType]) Item(index int) interfaces.Item[DataType] {
 	return i.page.Item(index)
 }
 
-func (i *BTPageItems[DataType]) Split() ([]interfaces.Item[DataType], []interfaces.Page[DataType], []interfaces.Item[DataType], []interfaces.Page[DataType], interfaces.Item[DataType]) {
+func (i *BTPageItems[DataType]) Split() ([]interfaces.Item[DataType], []interfaces.Item[DataType], int) {
 	items := i.page.Items().ToSlice()
 	middle := (i.page.Size()) / 2
 	left := make([]interfaces.Item[DataType], middle, i.page.Capacity()+1)
 	right := make([]interfaces.Item[DataType], middle, i.page.Capacity()+1)
-	childrenLeft := make([]interfaces.Page[DataType], 0, i.page.Capacity()+2)
-	childrenRight := make([]interfaces.Page[DataType], 0, i.page.Capacity()+2)
 	copy(left, items[:middle])
 	copy(right, items[middle+1:])
-	if !i.page.IsLeaf() {
-		for x := 0; x <= middle; x++ {
-			childrenLeft = append(childrenLeft, i.page.Child(x))
-		}
-		for x := middle + 1; x <= i.page.Capacity()+1; x++ {
-			childrenRight = append(childrenRight, i.page.Child(x))
-		}
-	}
 
-	return left, childrenLeft, right, childrenRight, items[middle]
+	return left, right, middle
 }
 
 func (i *BTPageItems[DataType]) ToSlice() []interfaces.Item[DataType] {

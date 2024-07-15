@@ -10,4 +10,6 @@ type PageChildren[DataType any] interface {
 	Put(offset int64)
 	Set(Page[DataType], ...Page[DataType]) PageChildren[DataType]
 	Size() int
+	Split(int) ([]Page[DataType], []Page[DataType])
+	Unload()
 }

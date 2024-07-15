@@ -2,11 +2,11 @@ package persistence
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"reflect"
 
 	"github.com/mylux/bsistent/interfaces"
+	"github.com/mylux/bsistent/serialization"
 )
 
 type SerializedItem struct {
@@ -17,49 +17,38 @@ type SerializedItem struct {
 type SerializedPage struct {
 	Offset   int64
 	Capacity int64
-	Items    [][]byte
+	Items    []SerializedItem
 	Parent   int64
 	Children []int64
 }
 
-func serializeItem[T any](x interfaces.Item[T]) ([]byte, error) {
+var serializer *serialization.Serializer = &serialization.Serializer{}
+
+func serializeItem[T any](x interfaces.Item[T]) (*SerializedItem, error) {
 	finalValue, err := encode(x.Content())
 	if err != nil {
 		return nil, err
 	}
-	return generateEncodedItem(finalValue)
+	return &SerializedItem{
+		Empty:   x.IsEmpty(),
+		Content: finalValue,
+	}, nil
 }
 
-func generateEncodedZeroItem(size int64) []byte {
-	r, _ := generateEncodedItem(make([]byte, size), true)
-	return r
-}
-
-func generateEncodedItem(v []byte, empty ...bool) ([]byte, error) {
-	var err error
-	var e bool = false
-	if len(empty) > 0 {
-		e = empty[0]
+func generateZeroItem(size int64) *SerializedItem {
+	return &SerializedItem{
+		Empty:   true,
+		Content: make([]byte, size),
 	}
-	sb := &bytes.Buffer{}
-	r := &SerializedItem{
-		Empty:   e,
-		Content: v,
-	}
-	attrsToEncode := []any{r.Empty, r.Content}
-	for _, ate := range attrsToEncode {
-		_, err = encode(ate, sb)
-		if err != nil {
-			break
-		}
-	}
-	return sb.Bytes(), err
 }
 
 func generateEncodedZeroPage(capacity int, itemValueSize int64) ([]byte, error) {
-	encodedItems := make([][]byte, 0, capacity)
-	for range capacity {
-		encodedItems = append(encodedItems, generateEncodedZeroItem(itemValueSize))
+	encodedItems := make([]SerializedItem, capacity)
+	for i := range capacity {
+		encodedItems[i] = SerializedItem{
+			Empty:   true,
+			Content: make([]byte, itemValueSize),
+		}
 	}
 
 	return encodePage(&SerializedPage{
@@ -73,12 +62,14 @@ func generateEncodedZeroPage(capacity int, itemValueSize int64) ([]byte, error) 
 
 func serializePage[T any](p interfaces.Page[T]) ([]byte, error) {
 	var err error
-	items := make([][]byte, p.Capacity())
+	var pit *SerializedItem
+	items := make([]SerializedItem, p.Capacity())
 	for i := range p.Size() {
-		items[i], err = serializeItem[T](p.Item(i))
+		pit, err = serializeItem[T](p.Item(i))
+		items[i] = *pit
 	}
 	for i := p.Size(); i < p.Capacity(); i++ {
-		items[i] = generateEncodedZeroItem(p.Item(0).Capacity())
+		items[i] = *generateZeroItem(p.Item(0).Capacity())
 	}
 	if err != nil {
 		return nil, err
@@ -98,126 +89,35 @@ func serializePage[T any](p interfaces.Page[T]) ([]byte, error) {
 }
 
 func encodePage(sp *SerializedPage) ([]byte, error) {
-	var err error
-	sb := &bytes.Buffer{}
-	attrsToEncode := []any{sp.Offset, sp.Capacity, sp.Parent, sp.Items, sp.Children}
-
-	for _, ate := range attrsToEncode {
-		_, err = encode(ate, sb)
-	}
-	return sb.Bytes(), err
-}
-
-func hydrateItem(data []byte) (*SerializedItem, error) {
-	var err error
-	buf := bytes.NewReader(data)
-	s := &SerializedItem{}
-	attrsToDecode := []any{&s.Empty, &s.Content}
-
-	for _, atd := range attrsToDecode {
-		err = decode(buf, atd)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return s, nil
+	return serializer.Serialize(*sp)
 }
 
 func hydratePage(data []byte) (*SerializedPage, error) {
-	var err error
-	buf := bytes.NewReader(data)
-	sp := &SerializedPage{}
-	attributesToDecode := []any{&sp.Offset, &sp.Capacity, &sp.Parent, &sp.Items, &sp.Children}
-	for _, atd := range attributesToDecode {
-		err = decode(buf, atd)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return sp, err
+	var p SerializedPage
+	err := decode(data, &p)
+	return &p, err
 }
 
-func decode(r *bytes.Reader, s any) error {
+func decode(r []byte, s any) error {
 	val := reflect.ValueOf(s).Elem()
 	if val.Kind() == reflect.Ptr {
-		return fmt.Errorf("decode: argument (%v) must be a pointer, %v found", s, val.Kind())
+		return fmt.Errorf("decode: argument (%v) must not be a pointer, %v found", s, val.Kind())
 	}
-
-	if val.Kind() == reflect.Slice {
-		var contentLen int32
-		if err := decode(r, &contentLen); err != nil {
-			return err
-		}
-		sliceType := val.Type().Elem()
-		newSlice := reflect.MakeSlice(val.Type(), int(contentLen), int(contentLen))
-		for i := 0; i < int(contentLen); i++ {
-			elem := reflect.New(sliceType).Interface()
-			if err := decode(r, elem); err != nil {
-				return err
-			}
-			newSlice.Index(i).Set(reflect.ValueOf(elem).Elem())
-		}
-		val.Set(newSlice)
-	} else {
-		return binary.Read(r, binary.LittleEndian, s)
-	}
-
-	return nil
+	return serializer.Deserialize(r, s)
 }
 
 func encode(p any, pbuf ...*bytes.Buffer) ([]byte, error) {
 	var buf *bytes.Buffer
+	var err error
 
 	if len(pbuf) > 0 {
 		buf = pbuf[0]
 	} else {
 		buf = &bytes.Buffer{}
 	}
-
-	if reflect.TypeOf(p).Kind() == reflect.Slice {
-		val := reflect.ValueOf(p)
-		err := binary.Write(buf, binary.LittleEndian, int32(val.Len()))
-		if err != nil {
-			return nil, err
-		}
-
-		if val.Type().Elem().Kind() == reflect.Slice {
-			for i := 0; i < val.Len(); i++ {
-				_, err = encode(val.Index(i).Interface(), buf)
-				if err != nil {
-					return nil, err
-				}
-			}
-		} else {
-			err = binary.Write(buf, binary.LittleEndian, p)
-		}
-		return buf.Bytes(), err
-	} else {
-		err := binary.Write(buf, binary.LittleEndian, p)
+	if s, err := serializer.Serialize(p); err == nil {
+		buf.Write(s)
 		return buf.Bytes(), err
 	}
-}
-
-func resizeSlice(slicePtr *any, newSize int) error {
-	if slicePtr == nil {
-		return fmt.Errorf("provided slicePtr is nil")
-	}
-	ptrValue := reflect.ValueOf(slicePtr)
-	if ptrValue.Kind() != reflect.Ptr {
-		return fmt.Errorf("provided value is not a pointer")
-	}
-	sliceValue := ptrValue.Elem()
-	if !sliceValue.IsValid() || sliceValue.Kind() != reflect.Slice {
-		return fmt.Errorf("provided value is not a slice")
-	}
-
-	newSlice := reflect.MakeSlice(sliceValue.Type(), newSize, newSize)
-
-	for i := 0; i < sliceValue.Len() && i < newSize; i++ {
-		newSlice.Index(i).Set(sliceValue.Index(i))
-	}
-
-	sliceValue.Set(newSlice)
-
-	return nil
+	return nil, err
 }

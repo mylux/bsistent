@@ -2,13 +2,11 @@ package btree
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/mylux/bsistent/interfaces"
 	"github.com/mylux/bsistent/utils"
 )
-
-const printPrefix = "|-- "
-const printSpacing = "    "
 
 type Btree[DataType any] struct {
 	size        int64
@@ -30,8 +28,40 @@ func (b *Btree[DataType]) Add(value DataType) {
 	}
 }
 
+func (b *Btree[DataType]) Find(partialItem DataType) (bool, DataType) {
+	currentPage := b.Root()
+	item := item[DataType](b.itemSize).Load(partialItem)
+	for currentPage != nil {
+		slot := currentPage.Items().SlotFor(item)
+		if slot > 0 {
+			previousItem := currentPage.Item(slot - 1)
+			if res, err := previousItem.Compare(item); err == nil && res == 0 {
+				return true, previousItem.Content()
+			}
+		}
+		currentPage = b.LoadPageChildren(currentPage).Nth(slot)
+	}
+	return false, reflect.Zero(reflect.TypeFor[DataType]()).Interface().(DataType)
+}
+
 func (b *Btree[DataType]) IsEmpty() bool {
 	return b.root.Size() == 0
+}
+
+func (b *Btree[DataType]) LoadOffsets(offsets []int64) []interfaces.Page[DataType] {
+	c := make([]interfaces.Page[DataType], len(offsets))
+	for i, o := range offsets {
+		c[i] = b.persistence.Load(o)
+	}
+	return c
+}
+
+func (b *Btree[DataType]) LoadPageChildren(page interfaces.Page[DataType]) interfaces.PageChildren[DataType] {
+	children := page.Children()
+	if !children.IsFetched() {
+		return NewPageChildren(page, b.LoadOffsets(children.Offsets()))
+	}
+	return page.Children()
 }
 
 func (b *Btree[DataType]) Size() int64 {
@@ -110,22 +140,6 @@ func (b *Btree[DataType]) genPagePrettyPrint(p interfaces.Page[DataType], prefix
 	return res
 }
 
-func (b *Btree[DataType]) LoadOffsets(offsets []int64) []interfaces.Page[DataType] {
-	c := make([]interfaces.Page[DataType], len(offsets))
-	for i, o := range offsets {
-		c[i] = b.persistence.Load(o)
-	}
-	return c
-}
-
-func (b *Btree[DataType]) LoadPageChildren(page interfaces.Page[DataType]) interfaces.PageChildren[DataType] {
-	children := page.Children()
-	if !children.IsFetched() {
-		return page.Children(b.LoadOffsets(children.Offsets()))
-	}
-	return page.Children()
-}
-
 func (b *Btree[DataType]) newPage(parent interfaces.Page[DataType]) interfaces.Page[DataType] {
 	p, _ := b.persistence.NewPage()
 	p.Parent(parent)
@@ -148,6 +162,7 @@ func (b *Btree[DataType]) persist() {
 		if b.rootChanged {
 			utils.PanicOnError(b.persistRoot)
 		}
+		p.Children().Unload()
 	}
 	utils.PanicOnError(b.persistSize)
 }
@@ -165,7 +180,9 @@ func (b *Btree[DataType]) persistSize() error {
 }
 
 func (b *Btree[DataType]) splitPage(page interfaces.Page[DataType]) {
-	left, childrenLeft, right, childrenRight, pivot := page.Items().Split()
+	left, right, middle := page.Items().Split()
+	pivot := page.Item(middle)
+	childrenLeft, childrenRight := b.LoadPageChildren(page).Split(middle)
 	ppg := page.Parent()
 	if ppg == nil {
 		ppg = b.newRoot(page)

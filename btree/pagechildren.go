@@ -15,6 +15,20 @@ type BTPageChildren[DataType any] struct {
 	children []*BTChildPage[DataType]
 }
 
+func NewPageChildren[DataType any](parent interfaces.Page[DataType], childrenPages []interfaces.Page[DataType]) interfaces.PageChildren[DataType] {
+	children := make([]*BTChildPage[DataType], len(childrenPages))
+	for i, child := range childrenPages {
+		child.Parent(parent)
+		children[i] = &BTChildPage[DataType]{
+			Offset: child.Offset(),
+			Page:   child,
+		}
+	}
+	return &BTPageChildren[DataType]{
+		children: children,
+	}
+}
+
 func (b *BTPageChildren[DataType]) All() []interfaces.Page[DataType] {
 	r := make([]interfaces.Page[DataType], b.Size())
 	for i := range b.Size() {
@@ -75,6 +89,29 @@ func (b *BTPageChildren[DataType]) Set(parent interfaces.Page[DataType], pages .
 
 func (b *BTPageChildren[DataType]) Size() int {
 	return len(b.children)
+}
+
+func (b *BTPageChildren[DataType]) Split(middle int) ([]interfaces.Page[DataType], []interfaces.Page[DataType]) {
+	var childrenLeft []interfaces.Page[DataType]
+	var childrenRight []interfaces.Page[DataType]
+	if b.Size() > 0 {
+		capacity := b.children[0].Page.Capacity()
+		childrenLeft = make([]interfaces.Page[DataType], 0, capacity+2)
+		childrenRight = make([]interfaces.Page[DataType], 0, capacity+2)
+		for x := 0; x <= middle; x++ {
+			childrenLeft = append(childrenLeft, b.Nth(x))
+		}
+		for x := middle + 1; x <= capacity+1; x++ {
+			childrenRight = append(childrenRight, b.Nth(x))
+		}
+	}
+	return childrenLeft, childrenRight
+}
+
+func (b *BTPageChildren[DataType]) Unload() {
+	for i := range b.children {
+		b.children[i].Page = nil
+	}
 }
 
 func (b *BTPageChildren[DataType]) createChildPage(page interfaces.Page[DataType]) *BTChildPage[DataType] {

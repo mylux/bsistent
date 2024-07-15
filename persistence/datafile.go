@@ -1,7 +1,6 @@
 package persistence
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"unsafe"
@@ -59,16 +58,15 @@ func (d *DataFileBtreePersistence[DataType]) Load(offset int64, children ...bool
 	defer d.Unlock()
 	if !d.locked {
 		d.Lock()
-		b := utils.ReturnOrPanic[[]byte](func() ([]byte, error) { return d.readPageBytes(offset) })
-		sp := utils.ReturnOrPanic[*SerializedPage](func() (*SerializedPage, error) { return hydratePage(b) })
+		b := utils.ReturnOrPanic(func() ([]byte, error) { return d.readPageBytes(offset) })
+		sp := utils.ReturnOrPanic(func() (*SerializedPage, error) { return hydratePage(b) })
 		items := make([]interfaces.Item[DataType], 0, sp.Capacity)
 		r := d.pageConstructor(offset)
-		for _, i := range sp.Items {
+		for _, si := range sp.Items {
 			item := d.itemConstructor()
-			si := utils.ReturnOrPanic[*SerializedItem](func() (*SerializedItem, error) { return hydrateItem(i) })
 			if !si.Empty {
 				var itemValue DataType
-				utils.PanicOnError(func() error { return decode(bytes.NewReader(si.Content), &itemValue) })
+				utils.PanicOnError(func() error { return decode(si.Content, &itemValue) })
 				item.Load(itemValue)
 				items = append(items, item)
 			}
@@ -102,11 +100,10 @@ func (d *DataFileBtreePersistence[DataType]) LoadRoot() (interfaces.Page[DataTyp
 func (d *DataFileBtreePersistence[DataType]) LoadReference() (int64, error) {
 	var r int64
 	b, err := d.readBytes(rootPageRefOffset, int64(unsafe.Sizeof(rootPageRefOffset)))
-	buf := bytes.NewReader(b)
 	if err != nil {
 		return -1, err
 	}
-	err = decode(buf, &r)
+	err = decode(b, &r)
 	if err != nil {
 		return -1, err
 	}
@@ -120,8 +117,7 @@ func (d *DataFileBtreePersistence[DataType]) LoadSize() (int64, error) {
 	if err != nil {
 		return -1, err
 	}
-	buf := bytes.NewReader(b)
-	err = decode(buf, &size)
+	err = decode(b, &size)
 	return size, err
 }
 
