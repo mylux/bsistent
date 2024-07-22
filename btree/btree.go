@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/mylux/bsistent/constants"
 	"github.com/mylux/bsistent/interfaces"
 	"github.com/mylux/bsistent/utils"
 )
@@ -129,8 +130,8 @@ func (b *Btree[DataType]) findLeafFor(page interfaces.Page[DataType], item inter
 func (b *Btree[DataType]) genPagePrettyPrint(p interfaces.Page[DataType], prefix string) string {
 	var res string
 	if p != nil {
-		res = fmt.Sprintln(prefix, printPrefix, p)
-		newPrefix := prefix + printSpacing
+		res = fmt.Sprintln(prefix, constants.PrintPrefix, p)
+		newPrefix := prefix + constants.PrintSpacing
 		children := b.LoadPageChildren(p)
 		p = nil
 		for _, c := range children.All() {

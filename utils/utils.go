@@ -2,8 +2,7 @@ package utils
 
 import (
 	"reflect"
-
-	"github.com/mylux/bsistent/serialization"
+	"strings"
 )
 
 func PanicOnError(f func() error) {
@@ -30,30 +29,47 @@ func invokePanicOnError(err error) {
 	}
 }
 
-func SizeOf(v interface{}) (int, error) {
-	serializer := &serialization.Serializer{}
-	s, err := serializer.Serialize(v)
-	if err == nil {
-		return len(s), err
-	}
-	return 0, err
-}
-
-func GetTaggedFieldValues(v interface{}, tagKey, tagValue string) []any {
+func GetTaggedFieldValues(v any, tagName, tagKey string, pTagValue ...string) []any {
 	r := []any{}
 	val := reflect.ValueOf(v)
 	typ := reflect.TypeOf(v)
+	tagValue := ""
+	if len(pTagValue) > 0 {
+		tagValue = pTagValue[0]
+	}
 	if typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 		val = val.Elem()
 	}
 	if typ.Kind() == reflect.Struct {
 		for i := 0; i < val.NumField(); i++ {
-			tag := typ.Field(i).Tag.Get(tagKey)
-			if tag == tagValue {
+			found, value := GetFieldTagKey(typ.Field(i), tagName, tagKey)
+			if found && value == tagValue {
 				r = append(r, val.Field(i).Interface())
+				break
 			}
 		}
 	}
 	return r
+}
+
+func GetFieldTagKey(field reflect.StructField, tagName string, tagKey string) (bool, string) {
+	if tagParts := strings.Split(field.Tag.Get(tagName), ";"); len(tagParts) > 0 {
+		for _, part := range tagParts {
+			if kv := strings.Split(part, ":"); len(kv) > 0 {
+				if kv[0] == tagKey {
+					switch len(kv) {
+					case 1:
+						return true, ""
+					case 2:
+						return true, kv[1]
+					default:
+						return false, ""
+					}
+				}
+			}
+		}
+		return false, ""
+	}
+	return false, ""
 }

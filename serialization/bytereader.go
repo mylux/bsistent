@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"reflect"
 )
 
@@ -58,8 +59,13 @@ func (b *Serializer) deserializeStruct(buf *bytes.Reader, val reflect.Value) err
 		if df, err = b.getDeserializerFunc(field.Kind()); err != nil {
 			return err
 		}
+		remainingBefore := buf.Len()
 		if err = df(buf, field); err != nil {
 			return err
+		}
+		fieldValueSize := remainingBefore - buf.Len()
+		if maxSize := b.getMaxSize(val, i); maxSize > fieldValueSize {
+			buf.Seek(int64(maxSize-fieldValueSize), io.SeekCurrent)
 		}
 	}
 	return nil

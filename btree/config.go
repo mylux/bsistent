@@ -6,6 +6,8 @@ import (
 
 	"github.com/mylux/bsistent/assemblers"
 	"github.com/mylux/bsistent/interfaces"
+	"github.com/mylux/bsistent/serialization"
+	"github.com/mylux/bsistent/utils"
 )
 
 var defaultConfig BTConfig[any] = BTConfig[any]{
@@ -47,6 +49,11 @@ func (c *BTConfig[DataType]) Grade(grade int) *BTConfig[DataType] {
 
 func (c *BTConfig[DataType]) ItemSize(itemSize int64) *BTConfig[DataType] {
 	c.itemSize = itemSize
+	return c
+}
+
+func (c *BTConfig[DataType]) ItemShape(shape any) *BTConfig[DataType] {
+	c.itemSize = int64(utils.ReturnOrPanic(func() (int, error) { return (&serialization.Serializer{}).SizeOf(shape) }))
 	return c
 }
 

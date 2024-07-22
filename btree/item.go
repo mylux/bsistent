@@ -8,7 +8,9 @@ import (
 	"math/big"
 	"reflect"
 
+	"github.com/mylux/bsistent/constants"
 	"github.com/mylux/bsistent/interfaces"
+	"github.com/mylux/bsistent/serialization"
 	"github.com/mylux/bsistent/utils"
 )
 
@@ -23,8 +25,10 @@ func (b *BTItem[DataType]) Capacity() int64 {
 
 func (b *BTItem[DataType]) Compare(j interfaces.Item[DataType]) (int, error) {
 	var r int
-	compareFieldsB := utils.GetTaggedFieldValues(b.Content(), bsistentTagName, bsistentTagKeyName)
-	compareFieldsJ := utils.GetTaggedFieldValues(j.Content(), bsistentTagName, bsistentTagKeyName)
+	contentB := b.Content()
+	contentJ := j.Content()
+	compareFieldsB := utils.GetTaggedFieldValues(contentB, constants.BsistentFlags.Tag, constants.BsistentFlags.Key)
+	compareFieldsJ := utils.GetTaggedFieldValues(contentJ, constants.BsistentFlags.Tag, constants.BsistentFlags.Key)
 	if lcf := len(compareFieldsB); lcf == 0 || lcf != len(compareFieldsJ) {
 		return b.compareBytes(b.content, j.Content())
 	}
@@ -52,7 +56,7 @@ func (b *BTItem[DataType]) IsEmpty() bool {
 }
 
 func (b *BTItem[DataType]) Load(value DataType) interfaces.Item[DataType] {
-	v, err := utils.SizeOf(value)
+	v, err := (&serialization.Serializer{}).SizeOf(value)
 	if err != nil {
 		return nil
 	}

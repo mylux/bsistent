@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"slices"
 
 	"github.com/mylux/bsistent/interfaces"
 	"github.com/mylux/bsistent/serialization"
@@ -28,6 +29,10 @@ func serializeItem[T any](x interfaces.Item[T]) (*SerializedItem, error) {
 	finalValue, err := encode(x.Content())
 	if err != nil {
 		return nil, err
+	}
+	cap := int(x.Capacity())
+	if size := len(finalValue); size < cap {
+		finalValue = slices.Concat(finalValue, make([]byte, cap-size))
 	}
 	return &SerializedItem{
 		Empty:   x.IsEmpty(),
@@ -89,7 +94,7 @@ func serializePage[T any](p interfaces.Page[T]) ([]byte, error) {
 }
 
 func encodePage(sp *SerializedPage) ([]byte, error) {
-	return serializer.Serialize(*sp)
+	return encode(*sp)
 }
 
 func hydratePage(data []byte) (*SerializedPage, error) {
@@ -101,23 +106,19 @@ func hydratePage(data []byte) (*SerializedPage, error) {
 func decode(r []byte, s any) error {
 	val := reflect.ValueOf(s).Elem()
 	if val.Kind() == reflect.Ptr {
-		return fmt.Errorf("decode: argument (%v) must not be a pointer, %v found", s, val.Kind())
+		return fmt.Errorf("decode: argument (%v) must not be a pointer of pointer, %v found", s, val.Kind())
 	}
 	return serializer.Deserialize(r, s)
 }
 
 func encode(p any, pbuf ...*bytes.Buffer) ([]byte, error) {
-	var buf *bytes.Buffer
 	var err error
-
-	if len(pbuf) > 0 {
-		buf = pbuf[0]
-	} else {
-		buf = &bytes.Buffer{}
-	}
 	if s, err := serializer.Serialize(p); err == nil {
-		buf.Write(s)
-		return buf.Bytes(), err
+		if len(pbuf) > 0 {
+			pbuf[0].Write(s)
+			return pbuf[0].Bytes(), nil
+		}
+		return s, err
 	}
 	return nil, err
 }

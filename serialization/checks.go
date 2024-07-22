@@ -11,3 +11,12 @@ func (b *Serializer) isFixedSizeType(kind reflect.Kind) bool {
 	}
 	return false
 }
+
+func (b *Serializer) SizeOf(v interface{}) (int, error) {
+	serializer := &Serializer{}
+	s, err := serializer.Serialize(v)
+	if err == nil {
+		return len(s), err
+	}
+	return 0, err
+}

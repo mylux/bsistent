@@ -1,9 +1,10 @@
-package main
+package main_test
 
 import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/mylux/bsistent/btree"
 	"github.com/mylux/bsistent/interfaces"
@@ -12,11 +13,13 @@ import (
 )
 
 type treeitem struct {
-	Id            string `bsistent:"key"`
+	Id            string `bsistent:"key;maxSize:255"`
 	SomethingMore int64
 }
 
-const listSize int64 = 500
+const treeSize int64 = 500
+
+var cacheSize int = 40
 
 func generateUniqueInts(size int64) []int64 {
 	if size <= 0 {
@@ -80,7 +83,7 @@ func validateTree[T any](bt *btree.Btree[T], t *testing.T) bool {
 
 func setUpTreeOfInt(n int64, reset ...bool) *btree.Btree[int64] {
 	var numbers []int64
-	c := btree.Configuration[int64]().Grade(5).ItemSize(8).CacheSize(40).StoragePath("/tmp/unit-test-btree")
+	c := btree.Configuration[int64]().Grade(5).ItemSize(8).CacheSize(uint32(cacheSize)).StoragePath("/tmp/unit-test-btree")
 	if len(reset) > 0 && reset[0] {
 		c = c.Reset()
 		numbers = generateUniqueInts(n)
@@ -98,8 +101,7 @@ func setUpTreeOfStruct(n int64, reset ...bool) *btree.Btree[treeitem] {
 	var numberValues []int64
 	nId := 10
 	letters := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-	itemSize := utils.ReturnOrPanic(func() (int, error) { return utils.SizeOf(treeitem{Id: "0123456789", SomethingMore: 0}) })
-	c := btree.Configuration[treeitem]().Grade(5).ItemSize(int64(itemSize)).CacheSize(40).StoragePath("/tmp/unit-test-btree")
+	c := btree.Configuration[treeitem]().Grade(5).ItemShape(treeitem{Id: "0123456789", SomethingMore: 0}).CacheSize(uint32(cacheSize)).StoragePath("/tmp/unit-test-btree")
 	if len(reset) > 0 && reset[0] {
 		c = c.Reset()
 		numberValues = generateUniqueInts(n)
@@ -121,21 +123,58 @@ func setUpTreeOfStruct(n int64, reset ...bool) *btree.Btree[treeitem] {
 }
 
 func TestNewTree(t *testing.T) {
-	n := listSize
+	n := treeSize
 	bt := setUpTreeOfInt(n, true)
 	assert.Equal(t, n, bt.Size(), "The list size and the number of elements should be the same")
 	assert.True(t, validateTree(bt, t))
 }
 
 func TestNewTreeStruct(t *testing.T) {
-	n := listSize
+	n := treeSize
 	bt := setUpTreeOfStruct(n, true)
 	assert.Equal(t, n, bt.Size(), "The list size and the number of elements should be the same")
 	assert.True(t, validateTree(bt, t))
 }
 
+func TestNewTreeStructVariableSize(t *testing.T) {
+	n := treeSize
+	bt := setUpTreeOfStruct(n, true)
+	assert.Equal(t, n, bt.Size(), "The list size and the number of elements should be the same")
+	lessThan10 := treeitem{
+		Id:            "LessThan",
+		SomethingMore: 10,
+	}
+	tiny := treeitem{
+		Id:            "tiny",
+		SomethingMore: 1,
+	}
+	big := treeitem{
+		Id:            "Spoke to the people on the beaches we used to sit alone",
+		SomethingMore: 19,
+	}
+	bt.Add(lessThan10)
+	bt.Add(tiny)
+	bt.Add(big)
+	assert.True(t, validateTree(bt, t))
+	found, item := bt.Find(treeitem{
+		Id: "LessThan",
+	})
+	assert.True(t, found)
+	assert.Equal(t, lessThan10, item)
+	found, item = bt.Find(treeitem{
+		Id: "tiny",
+	})
+	assert.True(t, found)
+	assert.Equal(t, tiny, item)
+	found, item = bt.Find(treeitem{
+		Id: "Spoke to the people on the beaches we used to sit alone",
+	})
+	assert.True(t, found)
+	assert.Equal(t, big, item)
+}
+
 func TestLoadFromDisk(t *testing.T) {
-	n := listSize
+	n := treeSize
 	btn := setUpTreeOfInt(n, true)
 	assert.Equal(t, n, btn.Size(), "The list size and the number of elements should be the same")
 	assert.True(t, validateTree(btn, t))
@@ -147,7 +186,7 @@ func TestLoadFromDisk(t *testing.T) {
 }
 
 func TestLoadFromDistStruct(t *testing.T) {
-	n := listSize
+	n := treeSize
 	btn := setUpTreeOfStruct(n, true)
 	assert.Equal(t, n, btn.Size(), "The list size and the number of elements should be the same")
 	assert.True(t, validateTree(btn, t))
@@ -159,10 +198,8 @@ func TestLoadFromDistStruct(t *testing.T) {
 }
 
 func TestFindStructExisting(t *testing.T) {
-	n := listSize
+	n := treeSize
 	btn := setUpTreeOfStruct(n, true)
-	assert.Equal(t, n, btn.Size(), "The list size and the number of elements should be the same")
-	assert.True(t, validateTree(btn, t))
 	x := treeitem{
 		Id:            "MyId567890",
 		SomethingMore: 23,
@@ -176,12 +213,56 @@ func TestFindStructExisting(t *testing.T) {
 }
 
 func TestFindStructNonExisting(t *testing.T) {
-	n := listSize
+	n := treeSize
 	btn := setUpTreeOfStruct(n, true)
-	assert.Equal(t, n, btn.Size(), "The list size and the number of elements should be the same")
-	assert.True(t, validateTree(btn, t))
 	found, _ := btn.Find(treeitem{
 		Id: "..Id567890",
 	})
 	assert.False(t, found)
+}
+
+func TestCompareCache(t *testing.T) {
+	sthMore := int64(1)
+	cacheSize = 0
+	partial := treeitem{
+		Id: "mything",
+	}
+	n := treeSize
+	bt := setUpTreeOfStruct(n, true)
+	bt.Add(treeitem{
+		Id:            "mything",
+		SomethingMore: sthMore,
+	})
+	found, item := bt.Find(partial)
+	assert.True(t, found)
+	assert.Equal(t, sthMore, item.SomethingMore)
+
+	start := time.Now()
+	found, item = bt.Find(partial)
+	elapsedNoCache := time.Since(start)
+
+	assert.True(t, found)
+	assert.Equal(t, sthMore, item.SomethingMore)
+
+	cacheSize = 40
+	bt = setUpTreeOfStruct(n)
+	assert.Equal(t, int64(501), bt.Size())
+
+	found, item = bt.Find(partial)
+	assert.True(t, found)
+	assert.Equal(t, sthMore, item.SomethingMore)
+
+	start = time.Now()
+	found, item = bt.Find(partial)
+	elapsedWithCache := time.Since(start)
+	assert.True(t, found)
+	assert.Equal(t, sthMore, item.SomethingMore)
+	enc := elapsedNoCache.Nanoseconds()
+	ewc := elapsedWithCache.Nanoseconds()
+	assert.Greater(t, enc, ewc)
+	var perfImp float64 = ((float64(enc) - float64(ewc)) / float64(enc)) * 100
+	var speedRatio float64 = float64(enc) / float64(ewc) * 100
+	fmt.Printf("Find performance Without Cache: %d ns, versus %d ns with cache. ", enc, ewc)
+	fmt.Printf("Resulting in a performance improvement of %.2f%% or ", perfImp)
+	fmt.Printf("Search with cache being %.2f%% percent faster than the same search with no cache\n", speedRatio)
 }

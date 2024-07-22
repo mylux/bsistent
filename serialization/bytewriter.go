@@ -5,6 +5,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"strconv"
+
+	"github.com/mylux/bsistent/constants"
+	"github.com/mylux/bsistent/utils"
 )
 
 type serializerFunc func(reflect.Value, ...*bytes.Buffer) ([]byte, error)
@@ -25,6 +29,19 @@ func (b *Serializer) Serialize(data interface{}) ([]byte, error) {
 	} else {
 		return nil, err
 	}
+}
+
+func (b *Serializer) getMaxSize(val reflect.Value, fieldIndex int) int {
+	var maxSize int
+	var err error
+	tagName := constants.BsistentFlags.Tag
+	tagKey := constants.BsistentFlags.MaxSize
+	if found, m := utils.GetFieldTagKey(val.Type().Field(fieldIndex), tagName, tagKey); found {
+		if maxSize, err = strconv.Atoi(m); err != nil {
+			return 0
+		}
+	}
+	return maxSize
 }
 
 func (b *Serializer) getSerializerFunc(kind reflect.Kind) (serializerFunc, error) {
@@ -72,9 +89,15 @@ func (b *Serializer) serializeStruct(val reflect.Value, buff ...*bytes.Buffer) (
 		if sf, err = b.getSerializerFunc(field.Kind()); err != nil {
 			return nil, err
 		}
+		bufSizeBefore := tempBuf.Len()
 		if _, err = sf(field, tempBuf); err != nil {
 			return nil, err
 		}
+		addedSize := tempBuf.Len() - bufSizeBefore
+		if maxSize := b.getMaxSize(val, i); maxSize > addedSize {
+			tempBuf.Write(make([]byte, maxSize-addedSize))
+		}
+
 	}
 	structLen := int32(len(tempBuf.Bytes()))
 	if err := binary.Write(buf, binary.LittleEndian, structLen); err != nil {
