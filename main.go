@@ -56,7 +56,7 @@ func main() {
 		elements := generateUniqueInts(500)
 		// elements := fixedItems //[:23]
 		fmt.Printf("Elements: %v\n", elements)
-		fmt.Printf("Created a Btreee object with size=%d and storing data in %s file\n", b.Size(), b.StoragePath())
+		fmt.Printf("Created a Btree object with size=%d and storing data in %s file\n", b.Size(), b.StoragePath())
 		fmt.Printf("Add %d random item(s) into the tree\n", len(elements))
 		for _, e := range elements {
 			//fmt.Printf("Add an element into the tree: %d\n", e)
