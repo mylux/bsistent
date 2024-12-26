@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"math"
 	"reflect"
 	"slices"
@@ -15,6 +16,13 @@ func PanicIf(e bool, message string) {
 	if e {
 		panic(message)
 	}
+}
+
+func ErrorIf(e bool, message string) error {
+	if e {
+		return errors.New(message)
+	}
+	return nil
 }
 
 func ReturnOrPanic[T any](f func() (T, error)) T {

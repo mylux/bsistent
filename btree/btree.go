@@ -34,15 +34,17 @@ func (b *Btree[DataType]) Add(value DataType) {
 	}
 }
 
-func (b *Btree[DataType]) Delete(partialItem DataType) bool {
+func (b *Btree[DataType]) Delete(partialItem DataType) error {
 	if destPage, index := b.find(partialItem); destPage != nil {
-		if b.removeFromPage(index, destPage) {
-			b.size--
-			b.persist()
-			return true
+		err := b.removeFromPage(index, destPage)
+		if err != nil {
+			return err
 		}
+		b.size--
+		b.persist()
+		return nil
 	}
-	return false
+	return nil
 }
 
 func (b *Btree[DataType]) Find(partialItem DataType) (bool, DataType) {
@@ -151,9 +153,14 @@ func btree[DataType any](
 	}
 }
 
-func (b *Btree[DataType]) determineItemToGive(selected interfaces.Page[DataType], other interfaces.Page[DataType], siblingsDelta interfaces.PageDelta) (int, int) {
+func (b *Btree[DataType]) determineItemToGive(selected interfaces.Page[DataType], other interfaces.Page[DataType], siblingsDelta interfaces.PageDelta) (int, int, error) {
 	// Only works between siblings or child to parent.
-	utils.PanicIf(siblingsDelta.IsError(), "could not determine item to give, because there is no delta")
+	if err := utils.ErrorIf(siblingsDelta.IsError(), "could not determine item to give, because there is no delta"); err != nil {
+		return -1, -1, err
+	}
+	if err := utils.ErrorIf(selected.Parent() != other.Parent(), "pages are not siblings"); err != nil {
+		return -1, -1, err
+	}
 	lastItem := other.Items().Last()
 	slot := selected.Items().SlotFor(lastItem)
 	childIndexToGive := -1
@@ -161,7 +168,7 @@ func (b *Btree[DataType]) determineItemToGive(selected interfaces.Page[DataType]
 		childIndexToGive = slot
 	}
 	itemIndexToGive := max(0, selected.Items().SlotFor(lastItem)-1)
-	return itemIndexToGive, childIndexToGive
+	return itemIndexToGive, childIndexToGive, nil
 }
 
 func (b *Btree[DataType]) findLeafFor(page interfaces.Page[DataType], item interfaces.Item[DataType]) interfaces.Page[DataType] {
@@ -279,21 +286,22 @@ func (b *Btree[DataType]) persistSize() error {
 	return b.persistence.SaveSize(b.Size())
 }
 
-func (b *Btree[DataType]) fixPage(page interfaces.Page[DataType]) {
+func (b *Btree[DataType]) fixPage(page interfaces.Page[DataType]) error {
 	if page != nil {
 		sibling := b.selectSibling(page)
 		if sibling.Size() > b.minItems {
-			b.transferSelectedSiblingItem(sibling, page)
+			return b.transferSelectedSiblingItem(sibling, page)
 		} else {
 			b.mergePages(page, sibling)
 			if parent := page.Parent(); parent != nil && !b.PageIsValid(parent) {
-				b.fixPage(parent)
+				return b.fixPage(parent)
 			}
 		}
 	}
+	return nil
 }
 
-func (b *Btree[DataType]) maneuverItem(page interfaces.Page[DataType], index int) (interfaces.Page[DataType], int) {
+func (b *Btree[DataType]) maneuverItem(page interfaces.Page[DataType], index int) (interfaces.Page[DataType], int, error) {
 	if !page.IsLeaf() {
 		children := b.LoadPageChildren(page).Pick(index, index+1).BySize()
 		biggestChild := children.First()
@@ -306,28 +314,34 @@ func (b *Btree[DataType]) maneuverItem(page interfaces.Page[DataType], index int
 			}
 			b.pageGiveItems(leaf, page, edgeItemIndex)
 			b.pageGiveItems(page, leaf, newIndex)
-			return leaf, edgeItemIndex
+			return leaf, edgeItemIndex, nil
 		} else {
 			b.mergePages(biggestChild, children.Nth(1))
 			if b.PageNeedsAdjustment(page) {
-				b.fixPage(page)
+				err := b.fixPage(page)
+				if err != nil {
+					return nil, -1, err
+				}
 			}
-			return biggestChild, biggestChild.Size() / 2
+			return biggestChild, biggestChild.Size() / 2, nil
 		}
 	}
-	return page, index
+	return page, index, nil
 }
 
-func (b *Btree[DataType]) removeFromPage(index int, page interfaces.Page[DataType]) bool {
-	newPage, newIndex := b.maneuverItem(page, index)
+func (b *Btree[DataType]) removeFromPage(index int, page interfaces.Page[DataType]) error {
+	newPage, newIndex, err := b.maneuverItem(page, index)
+	if err != nil {
+		return err
+	}
 	if result := b.pageDeleteItem(newPage, newIndex); result == nil {
-		return false
+		return nil
 	}
 	if !b.PageIsValid(newPage) && newPage.NotSame(b.Root()) {
-		b.fixPage(newPage)
+		return b.fixPage(newPage)
 	}
 
-	return true
+	return nil
 }
 
 func (b *Btree[DataType]) safeGiveItem(from interfaces.Page[DataType], itemIndex int, to interfaces.Page[DataType]) {
@@ -381,11 +395,14 @@ func (b *Btree[DataType]) taintPages(pages ...interfaces.Page[DataType]) {
 	}
 }
 
-func (b *Btree[DataType]) transferSelectedSiblingItem(selectedSibling interfaces.Page[DataType], siblingToReceive interfaces.Page[DataType]) {
+func (b *Btree[DataType]) transferSelectedSiblingItem(selectedSibling interfaces.Page[DataType], siblingToReceive interfaces.Page[DataType]) error {
 	var itemIndexToGivePR int
 	parentPage := selectedSibling.Parent()
 	delta := selectedSibling.Delta(siblingToReceive)
-	itemIndexToGiveSP, childIndexToGive := b.determineItemToGive(selectedSibling, siblingToReceive, delta)
+	itemIndexToGiveSP, childIndexToGive, err := b.determineItemToGive(selectedSibling, siblingToReceive, delta)
+	if err != nil {
+		return err
+	}
 	b.pageGiveItems(selectedSibling, parentPage, itemIndexToGiveSP)
 	itemIndexToGivePR = utils.Limit(parentPage.Children().LookUp(siblingToReceive), 0, parentPage.Size()-1)
 	if !selectedSibling.IsLeaf() {
@@ -393,4 +410,5 @@ func (b *Btree[DataType]) transferSelectedSiblingItem(selectedSibling interfaces
 	}
 
 	b.pageGiveItems(parentPage, siblingToReceive, itemIndexToGivePR)
+	return nil
 }
