@@ -139,6 +139,7 @@ func (d *DataFileBtreePersistence[DataType]) Reset() {
 	d.rootOffset = 0
 	d.lastPageOffset = initialOffset
 	utils.PanicOnError(func() error { return d.fd.Truncate(0) })
+	utils.PanicOnError(func() error { return loadTreeSize(d) })
 }
 
 func (d *DataFileBtreePersistence[DataType]) Save(p interfaces.Page[DataType]) error {

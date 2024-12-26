@@ -1,12 +1,20 @@
 package utils
 
 import (
+	"math"
 	"reflect"
+	"slices"
 	"strings"
 )
 
 func PanicOnError(f func() error) {
 	invokePanicOnError(f())
+}
+
+func PanicIf(e bool, message string) {
+	if e {
+		panic(message)
+	}
 }
 
 func ReturnOrPanic[T any](f func() (T, error)) T {
@@ -72,4 +80,47 @@ func GetFieldTagKey(field reflect.StructField, tagName string, tagKey string) (b
 		return false, ""
 	}
 	return false, ""
+}
+
+func CoalesceBool(b []bool) bool {
+	return Coalesce(b, false)
+}
+
+func Coalesce[T any](v []T, dv T) T {
+	if len(v) > 0 {
+		return v[0]
+	}
+	return dv
+}
+
+func IntAbs(n int) int {
+	return int(math.Abs(float64(n)))
+}
+
+func Ternary[T any](cond bool, whenTrue T, whenFalse T) T {
+	if cond {
+		return whenTrue
+	}
+	return whenFalse
+}
+
+func Range(n int) []int {
+	r := make([]int, n)
+	for i := 0; i < n; i++ {
+		r[i] = i
+	}
+	return r
+}
+
+func GetFirstReturned[T any, U any](f func() (T, U)) T {
+	t, _ := f()
+	return t
+}
+
+func Limit(number int, edges ...int) int {
+	if len(edges) == 2 {
+		slices.Sort(edges)
+		return min(max(edges[0], number), edges[1])
+	}
+	return number
 }

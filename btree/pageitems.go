@@ -1,6 +1,10 @@
 package btree
 
-import "github.com/mylux/bsistent/interfaces"
+import (
+	"slices"
+
+	"github.com/mylux/bsistent/interfaces"
+)
 
 type BTPageItems[DataType any] struct {
 	page interfaces.Page[DataType]
@@ -16,6 +20,26 @@ func (i *BTPageItems[DataType]) Last() interfaces.Item[DataType] {
 
 func (i *BTPageItems[DataType]) Item(index int) interfaces.Item[DataType] {
 	return i.page.Item(index)
+}
+
+func (i *BTPageItems[DataType]) Lookup(item interfaces.Item[DataType]) int {
+	for it, itt := range i.ToSlice() {
+		if itt == item {
+			return it
+		}
+	}
+	return -1
+}
+
+func (i *BTPageItems[DataType]) Pop(index int) interfaces.Item[DataType] {
+	item := i.page.Item(index)
+	currentList := i.ToSlice()
+	if len(currentList) == 1 {
+		i.page.EmptyItems()
+	} else {
+		i.page.Items(slices.Delete(currentList, index, index+1)...)
+	}
+	return item
 }
 
 func (i *BTPageItems[DataType]) Split() ([]interfaces.Item[DataType], []interfaces.Item[DataType], int) {
@@ -39,7 +63,7 @@ func (i *BTPageItems[DataType]) ToSlice() []interfaces.Item[DataType] {
 }
 
 func (i *BTPageItems[DataType]) SlotFor(item interfaces.Item[DataType]) int {
-	var it int = 0
+	var it int
 	for it = 0; it < i.page.Size(); it++ {
 		res, _ := i.Item(it).Compare(item)
 		if res == 1 {
